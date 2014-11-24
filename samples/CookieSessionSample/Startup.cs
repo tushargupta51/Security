@@ -13,7 +13,7 @@ namespace CookieSessionSample
         {
             app.UseServices(services =>
             {
-                services.Add(DataProtectionServices.GetDefaultServices());
+                services.AddDataProtection();
             });
 
             app.UseCookieAuthentication(options => 

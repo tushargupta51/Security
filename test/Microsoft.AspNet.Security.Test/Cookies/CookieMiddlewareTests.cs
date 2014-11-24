@@ -368,7 +368,7 @@ namespace Microsoft.AspNet.Security.Cookies
         {
             return TestServer.Create(app =>
             {
-                app.UseServices(services => services.Add(DataProtectionServices.GetDefaultServices()));
+                app.UseServices(services => services.AddDataProtection());
                 app.UseCookieAuthentication(configureOptions);
                 app.Use(async (context, next) =>
                 {

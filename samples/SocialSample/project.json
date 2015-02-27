@@ -1,25 +1,22 @@
 {
-    "dependencies": {
-        "Microsoft.AspNet.Diagnostics": "1.0.0-*",
-        "Microsoft.AspNet.Security.Cookies": "1.0.0-*",
-        "Microsoft.AspNet.Security.Facebook": "1.0.0-*",
-        "Microsoft.AspNet.Security.Google": "1.0.0-*",
-        "Microsoft.AspNet.Security.MicrosoftAccount": "1.0.0-*",
-        "Microsoft.AspNet.Security.Twitter": "1.0.0-*",
-        "Microsoft.AspNet.Server.IIS": "1.0.0-*",
-        "Microsoft.AspNet.Server.WebListener": "1.0.0-*",
-        "Kestrel": "1.0.0-*"
-    },
-    "commands": {
-        /* Note all servers must use the same address and port because these are pre-registered with the various providers. */
-        "web": "Microsoft.AspNet.Hosting server=Microsoft.AspNet.Server.WebListener server.urls=http://localhost:54540",
-        "kestrel": "Microsoft.AspNet.Hosting --server Kestrel --server.urls http://localhost:54540"
-    },
-    "frameworks": {
-        "aspnet50": {
-        },
-        "aspnetcore50": {
-        }
-    },
-    "webroot": "wwwroot"
+  "dependencies": {
+    "Microsoft.AspNet.Diagnostics": "1.0.0-beta3",
+    "Microsoft.AspNet.Security.Cookies": "1.0.0-beta3",
+    "Microsoft.AspNet.Security.Facebook": "1.0.0-beta3",
+    "Microsoft.AspNet.Security.Google": "1.0.0-beta3",
+    "Microsoft.AspNet.Security.MicrosoftAccount": "1.0.0-beta3",
+    "Microsoft.AspNet.Security.Twitter": "1.0.0-beta3",
+    "Microsoft.AspNet.Server.IIS": "1.0.0-beta3",
+    "Microsoft.AspNet.Server.WebListener": "1.0.0-beta3",
+    "Kestrel": "1.0.0-beta3"
+  },
+  "commands": {
+    "web": "Microsoft.AspNet.Hosting server=Microsoft.AspNet.Server.WebListener server.urls=http://localhost:54540",
+    "kestrel": "Microsoft.AspNet.Hosting --server Kestrel --server.urls http://localhost:54540"
+  },
+  "frameworks": {
+    "aspnet50": {},
+    "aspnetcore50": {}
+  },
+  "webroot": "wwwroot"
 }

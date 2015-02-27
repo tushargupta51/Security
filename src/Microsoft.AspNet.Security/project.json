@@ -1,15 +1,18 @@
 {
-    "version": "1.0.0-*",
-    "description": "ASP.NET 5 common types used by the various authentication middleware.",
-    "dependencies": {
-        "Microsoft.AspNet.RequestContainer": "1.0.0-*",
-        "Microsoft.AspNet.Http.Interfaces": { "version": "1.0.0-*", "type": "build" },
-        "Microsoft.AspNet.Http.Core": "1.0.0-*",
-        "Microsoft.AspNet.Security.DataProtection": "1.0.0-*",
-        "Microsoft.Framework.Logging": "1.0.0-*"
+  "version": "1.0.0-beta3",
+  "description": "ASP.NET 5 common types used by the various authentication middleware.",
+  "dependencies": {
+    "Microsoft.AspNet.RequestContainer": "1.0.0-beta3",
+    "Microsoft.AspNet.Http.Interfaces": {
+      "version": "1.0.0-beta3",
+      "type": "build"
     },
-    "frameworks": {
-        "aspnet50": { },
-        "aspnetcore50": { }
-    }
+    "Microsoft.AspNet.Http.Core": "1.0.0-beta3",
+    "Microsoft.AspNet.Security.DataProtection": "1.0.0-beta3",
+    "Microsoft.Framework.Logging": "1.0.0-beta3"
+  },
+  "frameworks": {
+    "aspnet50": {},
+    "aspnetcore50": {}
+  }
 }

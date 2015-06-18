@@ -99,6 +99,7 @@ namespace Microsoft.AspNet.Authentication.Cookies
 
                 await Options.Notifications.ValidatePrincipal(context);
 
+                AuthenticateCalled = true;
                 return new AuthenticationTicket(context.Principal, context.Properties, Options.AuthenticationScheme);
             }
             catch (Exception exception)
@@ -362,29 +363,29 @@ namespace Microsoft.AspNet.Authentication.Cookies
                 return;
             }
 
-            var loginUri = string.Empty;
+            var redirectUri = string.Empty;
             if (ChallengeContext != null)
             {
-                loginUri = new AuthenticationProperties(ChallengeContext.Properties).RedirectUri;
+                redirectUri = new AuthenticationProperties(ChallengeContext.Properties).RedirectUri;
             }
 
             try
             {
-                if (string.IsNullOrWhiteSpace(loginUri))
+                if (string.IsNullOrWhiteSpace(redirectUri))
                 {
-                    var currentUri =
+                    redirectUri =
                         Request.PathBase +
                         Request.Path +
                         Request.QueryString;
-
-                    loginUri =
-                        Request.Scheme +
-                        "://" +
-                        Request.Host +
-                        Request.PathBase +
-                        Options.LoginPath +
-                        QueryString.Create(Options.ReturnUrlParameter, currentUri);
                 }
+
+                var loginUri =
+                    Request.Scheme +
+                    "://" +
+                    Request.Host +
+                    Request.PathBase +
+                    Options.LoginPath +
+                    QueryString.Create(Options.ReturnUrlParameter, redirectUri);
 
                 var redirectContext = new CookieApplyRedirectContext(Context, Options, loginUri);
                 Options.Notifications.ApplyRedirect(redirectContext);

@@ -33,7 +33,6 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
         private const string nonceForJwt = "abc";
         private static SecurityToken specCompliantJwt = new JwtSecurityToken("issuer", "audience", new List<Claim> { new Claim("iat", EpochTime.GetIntDate(DateTime.UtcNow).ToString()), new Claim("nonce", nonceForJwt) }, DateTime.UtcNow, DateTime.UtcNow + TimeSpan.FromDays(1));
         private const string ExpectedStateParameter = "expectedState";
-        private const string UserStateProperty = "userstate";
 
         /// <summary>
         /// Sanity check that logging is filtering, hi / low water marks are checked
@@ -74,32 +73,37 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
                 var properties = new AuthenticationProperties();
                 var dataset = new TheoryData<Action<OpenIdConnectAuthenticationOptions>, OpenIdConnectMessage>();
 
+                // expected user state is added to the message.Parameters.Items[ExpectedStateParameter]
+                // Userstate == null
                 var message = new OpenIdConnectMessage();
                 message.State = UrlEncoder.Default.UrlEncode(formater.Protect(properties));
                 message.Code = Guid.NewGuid().ToString();
                 message.Parameters.Add(ExpectedStateParameter, null);
                 dataset.Add(SetStateOptions, message);
 
+                // Userstate != null
                 message = new OpenIdConnectMessage();
                 properties.Items.Clear();
-                var userState = Guid.NewGuid().ToString();
+                var userstate = Guid.NewGuid().ToString();
                 message.Code = Guid.NewGuid().ToString();
-                properties.Items.Add(UserStateProperty, userState);
+                properties.Items.Add(OpenIdConnectAuthenticationDefaults.UserstatePropertiesKey, userstate);
                 message.State = UrlEncoder.Default.UrlEncode(formater.Protect(properties));
-                message.Parameters.Add(ExpectedStateParameter, userState);
+                message.Parameters.Add(ExpectedStateParameter, userstate);
                 dataset.Add(SetStateOptions, message);
                 return dataset;
             }
         }
 
         // Setup a notification to check for expected state.
-        // The state gets set by the runtime after the message received notification
+        // The state gets set by the runtime after the 'MessageReceivedNotification'
         private static void SetStateOptions(OpenIdConnectAuthenticationOptions options)
         {
             options.AuthenticationScheme = "OpenIdConnectHandlerTest";
             options.ConfigurationManager = ConfigurationManager.DefaultStaticConfigurationManager();
             options.ClientId = Guid.NewGuid().ToString();
             options.StateDataFormat = new AuthenticationPropertiesFormaterKeyValue();
+            options.SecurityTokenValidators = new Collection<ISecurityTokenValidator> { new CustomSecurityTokenValidator() };
+            options.ProtocolValidator = new CustomOpenIdConnectProtocolValidator();
             options.Notifications = new OpenIdConnectAuthenticationNotifications
             {
                 AuthorizationCodeReceived = notification =>
@@ -113,7 +117,6 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
                     Assert.Equal(notification.ProtocolMessage.State, notification.ProtocolMessage.Parameters[ExpectedStateParameter]);
                     return Task.FromResult<object>(null);
                 }
-
             };
         }
 
@@ -145,78 +148,96 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
 
                 // MessageReceived - Handled / Skipped
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 2 }, MessageReceivedHandledOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 2 }, MessageReceivedHandledOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 2 }, MessageReceivedHandledOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, MessageReceivedHandledOptions, message);
+
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 3 }, MessageReceivedSkippedOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 3 }, MessageReceivedSkippedOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 3 }, MessageReceivedSkippedOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, MessageReceivedSkippedOptions, message);
 
                 // State - null, empty string, invalid
                 message = new OpenIdConnectMessage();
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 4, 7 }, StateNullOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 4 }, StateNullOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 4, 7 }, StateNullOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, StateNullOptions, message);
 
                 message = new OpenIdConnectMessage();
                 message.State = string.Empty;
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 4, 7 }, StateNullOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 4 }, StateNullOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 4, 7 }, StateNullOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, StateNullOptions, message);
 
                 message = new OpenIdConnectMessage();
                 message.State = Guid.NewGuid().ToString();
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 5 }, StateInvalidOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 5 }, StateInvalidOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 5 }, StateInvalidOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { 5 }, StateInvalidOptions, message);
 
                 // OpenIdConnectMessage.Error != null
                 message = new OpenIdConnectMessage();
                 message.Error = "Error";
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 4, 6, 17, 18 }, MessageWithErrorOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 4, 6, 17, 18 }, MessageWithErrorOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 4, 6, 17, 18 }, MessageWithErrorOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { 6, 17 }, MessageWithErrorOptions, message);
 
                 // SecurityTokenReceived - Handled / Skipped 
                 message = new OpenIdConnectMessage();
                 message.IdToken = "invalid";
                 message.State = validState;
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 8 }, SecurityTokenReceivedHandledOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 8 }, SecurityTokenReceivedHandledOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7, 8 }, SecurityTokenReceivedHandledOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, SecurityTokenReceivedHandledOptions, message);
 
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 9 }, SecurityTokenReceivedSkippedOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 9 }, SecurityTokenReceivedSkippedOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7, 9 }, SecurityTokenReceivedSkippedOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, SecurityTokenReceivedSkippedOptions, message);
 
                 // SecurityTokenValidation - ReturnsNull, Throws, Validates
-                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 11, 17, 18 }, SecurityTokenValidatorCannotReadAnyToken, message);
-                dataset.Add(LogLevel.Information, new int[] { 17, 18 }, SecurityTokenValidatorCannotReadAnyToken, message);
+                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 11, 17, 18 }, SecurityTokenValidatorCannotReadToken, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7, 11, 17, 18 }, SecurityTokenValidatorCannotReadToken, message);
+                dataset.Add(LogLevel.Error, new int[] { 11, 17 }, SecurityTokenValidatorCannotReadToken, message);
 
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 17, 21, 18 }, SecurityTokenValidatorThrows, message);
-                dataset.Add(LogLevel.Information, new int[] { 17, 18 }, SecurityTokenValidatorThrows, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7, 17, 21, 18 }, SecurityTokenValidatorThrows, message);
+                dataset.Add(LogLevel.Error, new int[] { 17 }, SecurityTokenValidatorThrows, message);
 
                 message.Nonce = nonceForJwt;
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20 }, SecurityTokenValidatorValidatesAllTokens, message);
-                dataset.Add(LogLevel.Information, new int[] { }, SecurityTokenValidatorValidatesAllTokens, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7 }, SecurityTokenValidatorValidatesAllTokens, message);
+                dataset.Add(LogLevel.Error, new int[] { }, SecurityTokenValidatorValidatesAllTokens, message);
 
                 // SecurityTokenValidation - Handled / Skipped
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 12 }, SecurityTokenValidatedHandledOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 12 }, SecurityTokenValidatedHandledOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7, 12 }, SecurityTokenValidatedHandledOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, SecurityTokenValidatedHandledOptions, message);
 
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 13 }, SecurityTokenValidatedSkippedOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 13 }, SecurityTokenValidatedSkippedOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7, 13 }, SecurityTokenValidatedSkippedOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, SecurityTokenValidatedSkippedOptions, message);
 
                 // AuthenticationCodeReceived - Handled / Skipped
                 message = new OpenIdConnectMessage();
                 message.Code = Guid.NewGuid().ToString();
                 message.State = validState;
-                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 14, 15 }, AuthorizationCodeReceivedHandledOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 15 }, AuthorizationCodeReceivedHandledOptions, message);
+                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 23, 20, 14, 15 }, AuthorizationCodeReceivedHandledOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7, 15 }, AuthorizationCodeReceivedHandledOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, AuthorizationCodeReceivedHandledOptions, message);
 
-                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 14, 16 }, AuthorizationCodeReceivedSkippedOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 16 }, AuthorizationCodeReceivedSkippedOptions, message);
+                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 23, 20, 14, 16 }, AuthorizationCodeReceivedSkippedOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 7, 16 }, AuthorizationCodeReceivedSkippedOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, AuthorizationCodeReceivedSkippedOptions, message);
 
                 // CodeReceivedAndRedeemed and GetUserInformationFromUIEndpoint
                 message = new OpenIdConnectMessage();
                 message.IdToken = null;
                 message.Code = Guid.NewGuid().ToString();
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 4, 7, 23, 20, 8 }, CodeReceivedAndRedeemedHandledOptions, message);
-                dataset.Add(LogLevel.Information, new int[] { 4, 8 }, CodeReceivedAndRedeemedHandledOptions, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 4, 7, 8 }, CodeReceivedAndRedeemedHandledOptions, message);
+                dataset.Add(LogLevel.Error, new int[] { }, CodeReceivedAndRedeemedHandledOptions, message);
 
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 4, 7, 23, 20, 24, 12 }, GetUserInfoFromUIEndpoint, message);
-                dataset.Add(LogLevel.Information, new int[] { 4, 12 }, GetUserInfoFromUIEndpoint, message);
+                dataset.Add(LogLevel.Verbose, new int[] { 4, 7, 12 }, GetUserInfoFromUIEndpoint, message);
+                dataset.Add(LogLevel.Error, new int[] { }, GetUserInfoFromUIEndpoint, message);
 
                 return dataset;
             }
@@ -237,6 +258,8 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
         private static void AuthorizationCodeReceivedHandledOptions(OpenIdConnectAuthenticationOptions options)
         {
             DefaultOptions(options);
+            options.SecurityTokenValidators = new Collection<ISecurityTokenValidator> { new CustomSecurityTokenValidator() };
+            options.ProtocolValidator = new CustomOpenIdConnectProtocolValidator();
             options.Notifications =
                 new OpenIdConnectAuthenticationNotifications
                 {
@@ -251,6 +274,8 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
         private static void AuthorizationCodeReceivedSkippedOptions(OpenIdConnectAuthenticationOptions options)
         {
             DefaultOptions(options);
+            options.SecurityTokenValidators = new Collection<ISecurityTokenValidator> { new CustomSecurityTokenValidator() };
+            options.ProtocolValidator = new CustomOpenIdConnectProtocolValidator();
             options.Notifications =
                 new OpenIdConnectAuthenticationNotifications
                 {
@@ -265,6 +290,8 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
         private static void AuthenticationErrorHandledOptions(OpenIdConnectAuthenticationOptions options)
         {
             DefaultOptions(options);
+            options.SecurityTokenValidators = new Collection<ISecurityTokenValidator> { new CustomSecurityTokenValidator() };
+            options.ProtocolValidator = new CustomOpenIdConnectProtocolValidator();
             options.Notifications =
                 new OpenIdConnectAuthenticationNotifications
                 {
@@ -390,7 +417,7 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
                 };
         }
 
-        private static void SecurityTokenValidatorCannotReadAnyToken(OpenIdConnectAuthenticationOptions options)
+        private static void SecurityTokenValidatorCannotReadToken(OpenIdConnectAuthenticationOptions options)
         {
             AuthenticationErrorHandledOptions(options);
             Mock<ISecurityTokenValidator> mockValidator = new Mock<ISecurityTokenValidator>();
@@ -413,7 +440,6 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
         private static void SecurityTokenValidatorValidatesAllTokens(OpenIdConnectAuthenticationOptions options)
         {
             DefaultOptions(options);
-            options.GetClaimsFromUserInfoEndpoint = true;
             Mock<ISecurityTokenValidator> mockValidator = new Mock<ISecurityTokenValidator>();
             mockValidator.Setup(v => v.ValidateToken(It.IsAny<string>(), It.IsAny<TokenValidationParameters>(), out specCompliantJwt)).Returns(new ClaimsPrincipal());
             mockValidator.Setup(v => v.CanReadToken(It.IsAny<string>())).Returns(true);

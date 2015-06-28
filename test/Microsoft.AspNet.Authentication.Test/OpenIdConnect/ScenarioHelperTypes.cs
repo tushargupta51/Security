@@ -280,4 +280,11 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
             return new ClaimsPrincipal();
         }
     }
+
+    public class CustomOpenIdConnectProtocolValidator : OpenIdConnectProtocolValidator
+    {
+        public override void Validate(JwtSecurityToken jwt, OpenIdConnectProtocolValidationContext validationContext)
+        {
+        }
+    }
 }

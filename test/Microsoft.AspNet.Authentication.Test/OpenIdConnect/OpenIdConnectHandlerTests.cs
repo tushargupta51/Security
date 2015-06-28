@@ -188,17 +188,17 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
                 dataset.Add(LogLevel.Information, new int[] { 17, 18 }, SecurityTokenValidatorThrows, message);
 
                 message.Nonce = nonceForJwt;
-                //dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20 }, SecurityTokenValidatorValidatesAllTokens, message);
-                //dataset.Add(LogLevel.Information, new int[] { }, SecurityTokenValidatorValidatesAllTokens, message);
+                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20 }, SecurityTokenValidatorValidatesAllTokens, message);
+                dataset.Add(LogLevel.Information, new int[] { }, SecurityTokenValidatorValidatesAllTokens, message);
 
                 // SecurityTokenValidation - Handled / Skipped
-                //dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 12 }, SecurityTokenValidatedHandledOptions, message);
-                //dataset.Add(LogLevel.Information, new int[] { 12 }, SecurityTokenValidatedHandledOptions, message);
+                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 12 }, SecurityTokenValidatedHandledOptions, message);
+                dataset.Add(LogLevel.Information, new int[] { 12 }, SecurityTokenValidatedHandledOptions, message);
 
-                //dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 13 }, SecurityTokenValidatedSkippedOptions, message);
-                //dataset.Add(LogLevel.Information, new int[] { 13 }, SecurityTokenValidatedSkippedOptions, message);
+                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 7, 20, 13 }, SecurityTokenValidatedSkippedOptions, message);
+                dataset.Add(LogLevel.Information, new int[] { 13 }, SecurityTokenValidatedSkippedOptions, message);
 
-                // AuthenticationCodeReceived - Handled / Skipped 
+                // AuthenticationCodeReceived - Handled / Skipped
                 message = new OpenIdConnectMessage();
                 message.Code = Guid.NewGuid().ToString();
                 message.State = validState;
@@ -215,8 +215,8 @@ namespace Microsoft.AspNet.Authentication.Tests.OpenIdConnect
                 dataset.Add(LogLevel.Debug, new int[] { 0, 1, 4, 7, 23, 20, 8 }, CodeReceivedAndRedeemedHandledOptions, message);
                 dataset.Add(LogLevel.Information, new int[] { 4, 8 }, CodeReceivedAndRedeemedHandledOptions, message);
 
-                //dataset.Add(LogLevel.Debug, new int[] { 0, 1, 4, 7, 23, 20, 24, 12 }, GetUserInfoFromUIEndpoint, message);
-                //dataset.Add(LogLevel.Information, new int[] { 4, 12 }, GetUserInfoFromUIEndpoint, message);
+                dataset.Add(LogLevel.Debug, new int[] { 0, 1, 4, 7, 23, 20, 24, 12 }, GetUserInfoFromUIEndpoint, message);
+                dataset.Add(LogLevel.Information, new int[] { 4, 12 }, GetUserInfoFromUIEndpoint, message);
 
                 return dataset;
             }

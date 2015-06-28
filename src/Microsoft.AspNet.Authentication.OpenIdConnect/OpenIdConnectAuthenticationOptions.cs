@@ -165,7 +165,7 @@ namespace Microsoft.AspNet.Authentication.OpenIdConnect
         public bool DefaultToCurrentUriOnRedirect { get; set; }
 
         /// <summary>
-        /// Boolean to set whether the middleware should go to user info endpoint to retrieve claims or not.
+        /// Boolean to set whether the middleware should go to user info endpoint to retrieve additional claims or not after creating an identity from id_token received from token endpoint.
         /// </summary>
         public bool GetClaimsFromUserInfoEndpoint { get; set; }
 

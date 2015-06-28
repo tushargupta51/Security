@@ -635,28 +635,35 @@ namespace Microsoft.AspNet.Authentication.OpenIdConnect
             if (userInfoSubject == null || !string.Equals(userInfoSubject, subject, StringComparison.OrdinalIgnoreCase))
             {
                 Logger.LogError(Resources.OIDCH_0039_Subject_Claim_Mismatch);
-                throw new ArgumentException(Resources.OIDCH_0039_Subject_Claim_Mismatch); 
+                return ticket; 
             }
 
-            var userInfoIdentity = new ClaimsIdentity(identity);
+            foreach (var claim in identity.Claims)
+            {
+                // If this claimType is mapped by the JwtSeurityTokenHandler, then this property will be set
+                var shortClaimTypeName = claim.Properties.ContainsKey(JwtSecurityTokenHandler.ShortClaimTypeProperty) ?
+                    claim.Properties[JwtSecurityTokenHandler.ShortClaimTypeProperty] : string.Empty;
+
+                // checking if claim in the identity (generated from id_token) has the same type as a claim retrieved from userinfo endpoint
+                JToken value;
+                var isClaimIncluded = user.TryGetValue(claim.Type, out value) ? true : user.TryGetValue(shortClaimTypeName, out value);
+
+                // if a same claim type exists both in id_token identity and userinfo response, remove the json entry from the userinfo response
+                if (isClaimIncluded)
+                {
+                    var isClaimRemoved = user.Remove(claim.Type) ? true : user.Remove(shortClaimTypeName);
+                }
+            }
+
+            // adding remaining claims from userinfo endpoint to the identity
             foreach (var pair in user)
             {
                 JToken value;
                 var claimValue = user.TryGetValue(pair.Key, out value) ? value.ToString() : null;
-
-                var inboundClaimTypeMap = new Dictionary<string, string>(JwtSecurityTokenHandler.InboundClaimTypeMap);
-                string longClaimTypeName;
-                inboundClaimTypeMap.TryGetValue(pair.Key, out longClaimTypeName);
-
-                // checking if claim exist with either short or long name
-                if (!(identity.HasClaim(pair.Key, claimValue) || identity.HasClaim(longClaimTypeName, claimValue)))
-                {
-                    userInfoIdentity.AddClaim(new Claim(pair.Key, claimValue, ClaimValueTypes.String, Options.ClaimsIssuer));
-                }
+                identity.AddClaim(new Claim(pair.Key, claimValue, ClaimValueTypes.String, Options.ClaimsIssuer));
             }
 
-            ticket.Principal.AddIdentity(userInfoIdentity);
-            return ticket;
+            return new AuthenticationTicket(new ClaimsPrincipal(identity), ticket.Properties, ticket.AuthenticationScheme);
         }
 
         /// <summary>

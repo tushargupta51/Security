@@ -5,20 +5,25 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Security.Claims;
 using System.Threading.Tasks;
+using Microsoft.AspNet.Authentication.DataHandler.Encoder;
 using Microsoft.AspNet.Http;
 using Microsoft.AspNet.Http.Authentication;
 using Microsoft.AspNet.Http.Extensions;
+using Microsoft.AspNet.Http.Features.Authentication;
 using Microsoft.AspNet.WebUtilities;
+using Microsoft.Framework.Internal;
 using Microsoft.Framework.Logging;
 using Newtonsoft.Json.Linq;
 
 namespace Microsoft.AspNet.Authentication.OAuth
 {
-    public class OAuthAuthenticationHandler<TOptions, TNotifications> : AuthenticationHandler<TOptions>
-        where TOptions : OAuthAuthenticationOptions<TNotifications>
-        where TNotifications : IOAuthAuthenticationNotifications
+    public class OAuthAuthenticationHandler<TOptions> : AuthenticationHandler<TOptions> where TOptions : OAuthAuthenticationOptions
     {
+        private static readonly RandomNumberGenerator CryptoRandom = RandomNumberGenerator.Create();
+
         public OAuthAuthenticationHandler(HttpClient backchannel)
         {
             Backchannel = backchannel;
@@ -37,7 +42,7 @@ namespace Microsoft.AspNet.Authentication.OAuth
 
         public async Task<bool> InvokeReturnPathAsync()
         {
-            AuthenticationTicket ticket = await AuthenticateAsync();
+            var ticket = await AuthenticateAsync();
             if (ticket == null)
             {
                 Logger.LogWarning("Invalid return state, unable to redirect.");
@@ -56,7 +61,7 @@ namespace Microsoft.AspNet.Authentication.OAuth
 
             if (context.SignInScheme != null && context.Principal != null)
             {
-                Context.Authentication.SignIn(context.SignInScheme, context.Principal, context.Properties);
+                await Context.Authentication.SignInAsync(context.SignInScheme, context.Principal, context.Properties);
             }
 
             if (!context.IsRequestCompleted && context.RedirectUri != null)
@@ -73,17 +78,12 @@ namespace Microsoft.AspNet.Authentication.OAuth
             return context.IsRequestCompleted;
         }
 
-        protected override AuthenticationTicket AuthenticateCore()
-        {
-            return AuthenticateCoreAsync().GetAwaiter().GetResult();
-        }
-
-        protected override async Task<AuthenticationTicket> AuthenticateCoreAsync()
+        protected override async Task<AuthenticationTicket> AuthenticateAsync()
         {
             AuthenticationProperties properties = null;
             try
             {
-                IReadableStringCollection query = Request.Query;
+                var query = Request.Query;
 
                 // TODO: Is this a standard error returned by servers?
                 var value = query.Get("error");
@@ -94,8 +94,8 @@ namespace Microsoft.AspNet.Authentication.OAuth
                     return null;
                 }
 
-                string code = query.Get("code");
-                string state = query.Get("state");
+                var code = query.Get("code");
+                var state = query.Get("state");
 
                 properties = Options.StateDataFormat.Unprotect(state);
                 if (properties == null)
@@ -115,10 +115,7 @@ namespace Microsoft.AspNet.Authentication.OAuth
                     return new AuthenticationTicket(properties, Options.AuthenticationScheme);
                 }
 
-                string requestPrefix = Request.Scheme + "://" + Request.Host;
-                string redirectUri = requestPrefix + RequestPathBase + Options.CallbackPath;
-
-                var tokens = await ExchangeCodeAsync(code, redirectUri);
+                var tokens = await ExchangeCodeAsync(code, BuildRedirectUri(Options.CallbackPath));
 
                 if (string.IsNullOrWhiteSpace(tokens.AccessToken))
                 {
@@ -126,7 +123,33 @@ namespace Microsoft.AspNet.Authentication.OAuth
                     return new AuthenticationTicket(properties, Options.AuthenticationScheme);
                 }
 
-                return await GetUserInformationAsync(properties, tokens);
+                var identity = new ClaimsIdentity(Options.ClaimsIssuer);
+
+                if (Options.SaveTokensAsClaims)
+                {
+                    identity.AddClaim(new Claim("access_token", tokens.AccessToken,
+                                                ClaimValueTypes.String, Options.ClaimsIssuer));
+
+                    if (!string.IsNullOrEmpty(tokens.RefreshToken))
+                    {
+                        identity.AddClaim(new Claim("refresh_token", tokens.RefreshToken,
+                                                    ClaimValueTypes.String, Options.ClaimsIssuer));
+                    }
+
+                    if (!string.IsNullOrEmpty(tokens.TokenType))
+                    {
+                        identity.AddClaim(new Claim("token_type", tokens.TokenType,
+                                                    ClaimValueTypes.String, Options.ClaimsIssuer));
+                    }
+
+                    if (!string.IsNullOrEmpty(tokens.ExpiresIn))
+                    {
+                        identity.AddClaim(new Claim("expires_in", tokens.ExpiresIn,
+                                                    ClaimValueTypes.String, Options.ClaimsIssuer));
+                    }
+                }
+                
+                return await CreateTicketAsync(identity, properties, tokens);
             }
             catch (Exception ex)
             {
@@ -135,7 +158,7 @@ namespace Microsoft.AspNet.Authentication.OAuth
             }
         }
 
-        protected virtual async Task<TokenResponse> ExchangeCodeAsync(string code, string redirectUri)
+        protected virtual async Task<OAuthTokenResponse> ExchangeCodeAsync(string code, string redirectUri)
         {
             var tokenRequestParameters = new Dictionary<string, string>()
             {
@@ -151,79 +174,71 @@ namespace Microsoft.AspNet.Authentication.OAuth
             var requestMessage = new HttpRequestMessage(HttpMethod.Post, Options.TokenEndpoint);
             requestMessage.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
             requestMessage.Content = requestContent;
-            HttpResponseMessage response = await Backchannel.SendAsync(requestMessage, Context.RequestAborted);
+            var response = await Backchannel.SendAsync(requestMessage, Context.RequestAborted);
             response.EnsureSuccessStatusCode();
-            string oauthTokenResponse = await response.Content.ReadAsStringAsync();
+            var payload = JObject.Parse(await response.Content.ReadAsStringAsync());
 
-            JObject oauth2Token = JObject.Parse(oauthTokenResponse);
-            return new TokenResponse(oauth2Token);
+            return new OAuthTokenResponse(payload);
         }
 
-        protected virtual async Task<AuthenticationTicket> GetUserInformationAsync(AuthenticationProperties properties, TokenResponse tokens)
+        protected virtual async Task<AuthenticationTicket> CreateTicketAsync(ClaimsIdentity identity, AuthenticationProperties properties, OAuthTokenResponse tokens)
         {
-            var context = new OAuthGetUserInformationContext(Context, Options, Backchannel, tokens)
+            var notification = new OAuthAuthenticatedContext(Context, Options, Backchannel, tokens)
             {
-                Properties = properties,
+                Principal = new ClaimsPrincipal(identity),
+                Properties = properties
             };
-            await Options.Notifications.GetUserInformationAsync(context);
-            return new AuthenticationTicket(context.Principal, context.Properties, Options.AuthenticationScheme);
+            
+            await Options.Notifications.Authenticated(notification);
+
+            if (notification.Principal?.Identity == null)
+            {
+                return null;
+            }
+
+            return new AuthenticationTicket(notification.Principal, notification.Properties, Options.AuthenticationScheme);
         }
 
-        protected override void ApplyResponseChallenge()
+        protected override Task<bool> HandleUnauthorizedAsync([NotNull] ChallengeContext context)
         {
-            if (ShouldConvertChallengeToForbidden())
-            {
-                Response.StatusCode = 403;
-                return;
-            }
-
-            if (Response.StatusCode != 401)
-            {
-                return;
-            }
-
-            // When Automatic should redirect on 401 even if there wasn't an explicit challenge.
-            if (ChallengeContext == null && !Options.AutomaticAuthentication)
-            {
-                return;
-            }
-
-            string baseUri = Request.Scheme + "://" + Request.Host + Request.PathBase;
-
-            string currentUri = baseUri + Request.Path + Request.QueryString;
-
-            string redirectUri = baseUri + Options.CallbackPath;
-
-            AuthenticationProperties properties;
-            if (ChallengeContext == null)
-            {
-                properties = new AuthenticationProperties();
-            }
-            else
-            {
-                properties = new AuthenticationProperties(ChallengeContext.Properties);
-            }
+            var properties = new AuthenticationProperties(context.Properties);
             if (string.IsNullOrEmpty(properties.RedirectUri))
             {
-                properties.RedirectUri = currentUri;
+                properties.RedirectUri = CurrentUri;
             }
 
             // OAuth2 10.12 CSRF
             GenerateCorrelationId(properties);
 
-            string authorizationEndpoint = BuildChallengeUrl(properties, redirectUri);
+            var authorizationEndpoint = BuildChallengeUrl(properties, BuildRedirectUri(Options.CallbackPath));
 
             var redirectContext = new OAuthApplyRedirectContext(
                 Context, Options,
                 properties, authorizationEndpoint);
             Options.Notifications.ApplyRedirect(redirectContext);
+            return Task.FromResult(true);
+        }
+
+        protected override Task HandleSignOutAsync(SignOutContext context)
+        {
+            throw new NotSupportedException();
+        }
+
+        protected override Task HandleSignInAsync(SignInContext context)
+        {
+            throw new NotSupportedException();
+        }
+
+        protected override Task<bool> HandleForbiddenAsync(ChallengeContext context)
+        {
+            throw new NotSupportedException();
         }
 
         protected virtual string BuildChallengeUrl(AuthenticationProperties properties, string redirectUri)
         {
-            string scope = FormatScope();
+            var scope = FormatScope();
 
-            string state = Options.StateDataFormat.Protect(properties);
+            var state = Options.StateDataFormat.Protect(properties);
 
             var queryBuilder = new QueryBuilder()
             {
@@ -242,9 +257,60 @@ namespace Microsoft.AspNet.Authentication.OAuth
             return string.Join(" ", Options.Scope);
         }
 
-        protected override void ApplyResponseGrant()
+        protected void GenerateCorrelationId([NotNull] AuthenticationProperties properties)
         {
-            // N/A - No SignIn or SignOut support.
+            var correlationKey = Constants.CorrelationPrefix + Options.AuthenticationScheme;
+
+            var nonceBytes = new byte[32];
+            CryptoRandom.GetBytes(nonceBytes);
+            var correlationId = TextEncodings.Base64Url.Encode(nonceBytes);
+
+            var cookieOptions = new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = Request.IsHttps
+            };
+
+            properties.Items[correlationKey] = correlationId;
+
+            Response.Cookies.Append(correlationKey, correlationId, cookieOptions);
+        }
+
+        protected bool ValidateCorrelationId([NotNull] AuthenticationProperties properties)
+        {
+            var correlationKey = Constants.CorrelationPrefix + Options.AuthenticationScheme;
+            var correlationCookie = Request.Cookies[correlationKey];
+            if (string.IsNullOrWhiteSpace(correlationCookie))
+            {
+                Logger.LogWarning("{0} cookie not found.", correlationKey);
+                return false;
+            }
+
+            var cookieOptions = new CookieOptions
+            {
+                HttpOnly = true,
+                Secure = Request.IsHttps
+            };
+            Response.Cookies.Delete(correlationKey, cookieOptions);
+
+            string correlationExtra;
+            if (!properties.Items.TryGetValue(
+                correlationKey,
+                out correlationExtra))
+            {
+                Logger.LogWarning("{0} state property not found.", correlationKey);
+                return false;
+            }
+
+            properties.Items.Remove(correlationKey);
+
+            if (!string.Equals(correlationCookie, correlationExtra, StringComparison.Ordinal))
+            {
+                Logger.LogWarning("{0} correlation cookie and state property mismatch.", correlationKey);
+                return false;
+            }
+
+            return true;
         }
     }
 }

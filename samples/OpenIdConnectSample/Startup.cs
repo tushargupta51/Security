@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNet.Builder;
+﻿using System.Linq;
+using Microsoft.AspNet.Builder;
 using Microsoft.AspNet.Http;
 using Microsoft.AspNet.Http.Authentication;
 using Microsoft.AspNet.Authentication;
@@ -38,9 +39,9 @@ namespace OpenIdConnectSample
 
             app.Run(async context =>
             {
-                if (string.IsNullOrEmpty(context.User.Identity.Name))
+                if (!context.User.Identities.Any(identity => identity.IsAuthenticated))
                 {
-                    context.Authentication.Challenge(OpenIdConnectAuthenticationDefaults.AuthenticationScheme, new AuthenticationProperties { RedirectUri = "/" });
+                    await context.Authentication.ChallengeAsync(OpenIdConnectAuthenticationDefaults.AuthenticationScheme, new AuthenticationProperties { RedirectUri = "/" });
 
                     context.Response.ContentType = "text/plain";
                     await context.Response.WriteAsync("Hello First timer");

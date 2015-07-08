@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNet.Authentication.DataHandler;
 using Microsoft.AspNet.Authentication.MicrosoftAccount;
+using Microsoft.AspNet.Authentication.OAuth;
 using Microsoft.AspNet.Builder;
 using Microsoft.AspNet.DataProtection;
 using Microsoft.AspNet.Http;
@@ -31,7 +32,7 @@ namespace Microsoft.AspNet.Authentication.Tests.MicrosoftAccount
                 {
                     options.ClientId = "Test Client Id";
                     options.ClientSecret = "Test Client Secret";
-                    options.Notifications = new MicrosoftAccountAuthenticationNotifications
+                    options.Notifications = new OAuthAuthenticationNotifications
                     {
                         OnApplyRedirect = context =>
                         {
@@ -43,6 +44,42 @@ namespace Microsoft.AspNet.Authentication.Tests.MicrosoftAccount
             transaction.Response.StatusCode.ShouldBe(HttpStatusCode.Redirect);
             var query = transaction.Response.Headers.Location.Query;
             query.ShouldContain("custom=test");
+        }
+
+        [Fact]
+        public async Task SignInThrows()
+        {
+            var server = CreateServer(options =>
+            {
+                options.ClientId = "Test Id";
+                options.ClientSecret = "Test Secret";
+            });
+            var transaction = await server.SendAsync("https://example.com/signIn");
+            transaction.Response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        [Fact]
+        public async Task SignOutThrows()
+        {
+            var server = CreateServer(options =>
+            {
+                options.ClientId = "Test Id";
+                options.ClientSecret = "Test Secret";
+            });
+            var transaction = await server.SendAsync("https://example.com/signOut");
+            transaction.Response.StatusCode.ShouldBe(HttpStatusCode.OK);
+        }
+
+        [Fact]
+        public async Task ForbidThrows()
+        {
+            var server = CreateServer(options =>
+            {
+                options.ClientId = "Test Id";
+                options.ClientSecret = "Test Secret";
+            });
+            var transaction = await server.SendAsync("https://example.com/signOut");
+            transaction.Response.StatusCode.ShouldBe(HttpStatusCode.OK);
         }
 
         [Fact]
@@ -107,7 +144,7 @@ namespace Microsoft.AspNet.Authentication.Tests.MicrosoftAccount
                             return null;
                         }
                     };
-                    options.Notifications = new MicrosoftAccountAuthenticationNotifications
+                    options.Notifications = new OAuthAuthenticationNotifications
                     {
                         OnAuthenticated = context =>
                         {
@@ -155,12 +192,23 @@ namespace Microsoft.AspNet.Authentication.Tests.MicrosoftAccount
                     var res = context.Response;
                     if (req.Path == new PathString("/challenge"))
                     {
-                        context.Authentication.Challenge("Microsoft");
-                        res.StatusCode = 401;
+                        await context.Authentication.ChallengeAsync("Microsoft");
                     }
                     else if (req.Path == new PathString("/me"))
                     {
                         res.Describe(context.User);
+                    }
+                    else if (req.Path == new PathString("/signIn"))
+                    {
+                        await Assert.ThrowsAsync<NotSupportedException>(() => context.Authentication.SignInAsync("Microsoft", new ClaimsPrincipal()));
+                    }
+                    else if (req.Path == new PathString("/signOut"))
+                    {
+                        await Assert.ThrowsAsync<NotSupportedException>(() => context.Authentication.SignOutAsync("Microsoft"));
+                    }
+                    else if (req.Path == new PathString("/forbid"))
+                    {
+                        await Assert.ThrowsAsync<NotSupportedException>(() => context.Authentication.ForbidAsync("Microsoft"));
                     }
                     else
                     {

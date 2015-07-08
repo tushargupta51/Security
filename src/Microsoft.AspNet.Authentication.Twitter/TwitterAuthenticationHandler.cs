@@ -12,8 +12,10 @@ using System.Threading.Tasks;
 using Microsoft.AspNet.Authentication.Twitter.Messages;
 using Microsoft.AspNet.Http;
 using Microsoft.AspNet.Http.Authentication;
+using Microsoft.AspNet.Http.Features.Authentication;
 using Microsoft.AspNet.Http.Internal;
 using Microsoft.AspNet.WebUtilities;
+using Microsoft.Framework.Internal;
 using Microsoft.Framework.Logging;
 
 namespace Microsoft.AspNet.Authentication.Twitter
@@ -42,12 +44,7 @@ namespace Microsoft.AspNet.Authentication.Twitter
             return false;
         }
 
-        protected override AuthenticationTicket AuthenticateCore()
-        {
-            return AuthenticateCoreAsync().GetAwaiter().GetResult();
-        }
-
-        protected override async Task<AuthenticationTicket> AuthenticateCoreAsync()
+        protected override async Task<AuthenticationTicket> AuthenticateAsync()
         {
             AuthenticationProperties properties = null;
             try
@@ -85,24 +82,6 @@ namespace Microsoft.AspNet.Authentication.Twitter
                     return new AuthenticationTicket(properties, Options.AuthenticationScheme);
                 }
 
-                var accessToken = await ObtainAccessTokenAsync(Options.ConsumerKey, Options.ConsumerSecret, requestToken, oauthVerifier);
-
-                var context = new TwitterAuthenticatedContext(Context, accessToken.UserId, accessToken.ScreenName, accessToken.Token, accessToken.TokenSecret);
-
-                context.Principal = new ClaimsPrincipal(
-                    new ClaimsIdentity(
-                        new[]
-                        {
-                            new Claim(ClaimTypes.NameIdentifier, accessToken.UserId, "http://www.w3.org/2001/XMLSchema#string", Options.ClaimsIssuer),
-                            new Claim(ClaimTypes.Name, accessToken.ScreenName, "http://www.w3.org/2001/XMLSchema#string", Options.ClaimsIssuer),
-                            new Claim("urn:twitter:userid", accessToken.UserId, "http://www.w3.org/2001/XMLSchema#string", Options.ClaimsIssuer),
-                            new Claim("urn:twitter:screenname", accessToken.ScreenName, "http://www.w3.org/2001/XMLSchema#string", Options.ClaimsIssuer)
-                        },
-                        Options.ClaimsIssuer,
-                        ClaimsIdentity.DefaultNameClaimType,
-                        ClaimsIdentity.DefaultRoleClaimType));
-                context.Properties = requestToken.Properties;
-
                 var cookieOptions = new CookieOptions
                 {
                     HttpOnly = true,
@@ -111,9 +90,23 @@ namespace Microsoft.AspNet.Authentication.Twitter
 
                 Response.Cookies.Delete(StateCookie, cookieOptions);
 
-                await Options.Notifications.Authenticated(context);
+                var accessToken = await ObtainAccessTokenAsync(Options.ConsumerKey, Options.ConsumerSecret, requestToken, oauthVerifier);
+                
+                var identity = new ClaimsIdentity(new[]
+                {
+                    new Claim(ClaimTypes.NameIdentifier, accessToken.UserId, ClaimValueTypes.String, Options.ClaimsIssuer),
+                    new Claim(ClaimTypes.Name, accessToken.ScreenName, ClaimValueTypes.String, Options.ClaimsIssuer),
+                    new Claim("urn:twitter:userid", accessToken.UserId, ClaimValueTypes.String, Options.ClaimsIssuer),
+                    new Claim("urn:twitter:screenname", accessToken.ScreenName, ClaimValueTypes.String, Options.ClaimsIssuer)
+                },
+                Options.ClaimsIssuer);
 
-                return new AuthenticationTicket(context.Principal, context.Properties, Options.AuthenticationScheme);
+                if (Options.SaveTokensAsClaims)
+                {
+                    identity.AddClaim(new Claim("access_token", accessToken.Token, ClaimValueTypes.String, Options.ClaimsIssuer));
+                }
+                
+                return await CreateTicketAsync(identity, properties, accessToken);
             }
             catch (Exception ex)
             {
@@ -121,49 +114,34 @@ namespace Microsoft.AspNet.Authentication.Twitter
                 return new AuthenticationTicket(properties, Options.AuthenticationScheme);
             }
         }
-        protected override void ApplyResponseChallenge()
+
+        protected virtual async Task<AuthenticationTicket> CreateTicketAsync(ClaimsIdentity identity, AuthenticationProperties properties, AccessToken token)
         {
-            ApplyResponseChallengeAsync().GetAwaiter().GetResult();
+            var notification = new TwitterAuthenticatedContext(Context, token.UserId, token.ScreenName, token.Token, token.TokenSecret)
+            {
+                Principal = new ClaimsPrincipal(identity),
+                Properties = properties
+            };
+
+            await Options.Notifications.Authenticated(notification);
+            
+            if (notification.Principal?.Identity == null)
+            {
+                return null;
+            }
+
+            return new AuthenticationTicket(notification.Principal, notification.Properties, Options.AuthenticationScheme);
         }
 
-        protected override async Task ApplyResponseChallengeAsync()
+        protected override async Task<bool> HandleUnauthorizedAsync([NotNull] ChallengeContext context)
         {
-            if (ShouldConvertChallengeToForbidden())
-            {
-                Response.StatusCode = 403;
-                return;
-            }
-
-            if (Response.StatusCode != 401)
-            {
-                return;
-            }
-
-            // When Automatic should redirect on 401 even if there wasn't an explicit challenge.
-            if (ChallengeContext == null && !Options.AutomaticAuthentication)
-            {
-                return;
-            }
-
-            var requestPrefix = Request.Scheme + "://" + Request.Host;
-            var callBackUrl = requestPrefix + RequestPathBase + Options.CallbackPath;
-
-            AuthenticationProperties properties;
-            if (ChallengeContext == null)
-            {
-                properties = new AuthenticationProperties();
-            }
-            else
-            {
-                properties = new AuthenticationProperties(ChallengeContext.Properties);
-            }
+            var properties = new AuthenticationProperties(context.Properties);
             if (string.IsNullOrEmpty(properties.RedirectUri))
             {
-                properties.RedirectUri = requestPrefix + Request.PathBase + Request.Path + Request.QueryString;
+                properties.RedirectUri = CurrentUri;
             }
 
-            var requestToken = await ObtainRequestTokenAsync(Options.ConsumerKey, Options.ConsumerSecret, callBackUrl, properties);
-
+            var requestToken = await ObtainRequestTokenAsync(Options.ConsumerKey, Options.ConsumerSecret, BuildRedirectUri(Options.CallbackPath), properties);
             if (requestToken.CallbackConfirmed)
             {
                 var twitterAuthenticationEndpoint = AuthenticationEndpoint + requestToken.Token;
@@ -180,11 +158,13 @@ namespace Microsoft.AspNet.Authentication.Twitter
                     Context, Options,
                     properties, twitterAuthenticationEndpoint);
                 Options.Notifications.ApplyRedirect(redirectContext);
+                return true;
             }
             else
             {
                 Logger.LogError("requestToken CallbackConfirmed!=true");
             }
+            return false; // REVIEW: Make sure this should not stop other handlers
         }
 
         public async Task<bool> InvokeReturnPathAsync()
@@ -208,7 +188,7 @@ namespace Microsoft.AspNet.Authentication.Twitter
 
             if (context.SignInScheme != null && context.Principal != null)
             {
-                Context.Authentication.SignIn(context.SignInScheme, context.Principal, context.Properties);
+                await Context.Authentication.SignInAsync(context.SignInScheme, context.Principal, context.Properties);
             }
 
             if (!context.IsRequestCompleted && context.RedirectUri != null)
@@ -223,6 +203,21 @@ namespace Microsoft.AspNet.Authentication.Twitter
             }
 
             return context.IsRequestCompleted;
+        }
+
+        protected override Task HandleSignOutAsync(SignOutContext context)
+        {
+            throw new NotSupportedException();
+        }
+
+        protected override Task HandleSignInAsync(SignInContext context)
+        {
+            throw new NotSupportedException();
+        }
+
+        protected override Task<bool> HandleForbiddenAsync(ChallengeContext context)
+        {
+            throw new NotSupportedException();
         }
 
         private async Task<RequestToken> ObtainRequestTokenAsync(string consumerKey, string consumerSecret, string callBackUri, AuthenticationProperties properties)
@@ -379,11 +374,6 @@ namespace Microsoft.AspNet.Authentication.Twitter
                 var hash = algorithm.ComputeHash(Encoding.ASCII.GetBytes(signatureData));
                 return Convert.ToBase64String(hash);
             }
-        }
-
-        protected override void ApplyResponseGrant()
-        {
-            // N/A - No SignIn or SignOut support.
         }
     }
 }
